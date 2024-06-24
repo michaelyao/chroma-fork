@@ -1,12 +1,13 @@
 version: '3.9'
 
 networks:
-  net:
+  chroma-net:
+    name: chroma_network
     driver: bridge
 
 services:
-  server:
-    image: server
+  chroma-server:
+    image: chroma-server-img
     build:
       context: .
       dockerfile: Dockerfile
@@ -14,7 +15,7 @@ services:
       # Be aware that indexed data are located in "/chroma/chroma/"
       # Default configuration for persist_directory in chromadb/config.py
       # Read more about deployments: https://docs.trychroma.com/deployment
-      - chroma-data:/chroma/chroma
+      - /datadrive/dev/chroma-data:/chroma/chroma
     command: "--workers 1 --host 0.0.0.0 --port 8000 --proxy-headers --log-config chromadb/log_config.yml --timeout-keep-alive 30"
     environment:
       - IS_PERSISTENT=TRUE
@@ -30,15 +31,18 @@ services:
       - CHROMA_SERVER_NOFILE=${CHROMA_SERVER_NOFILE}
     restart: unless-stopped # possible values are: "no", always", "on-failure", "unless-stopped"
     ports:
-      - "8000:8000"
+      - 8001:8000
+    expose:
+      - 8000
     healthcheck:
       # Adjust below to match your container port
       test: [ "CMD", "curl", "-f", "http://localhost:8000/api/v1/heartbeat" ]
       interval: 30s
       timeout: 10s
       retries: 3
+    container_name: chroma_db_server
     networks:
-      - net
+      - chroma-net
 
 volumes:
   chroma-data:

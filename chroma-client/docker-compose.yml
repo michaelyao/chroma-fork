@@ -1,0 +1,35 @@
+version: "3.8"
+services:
+  chroma_application:
+    build:
+      context: .
+      dockerfile: ./Dockerfile
+    image: chroma_application_img
+    container_name: chroma_app
+    tty: true
+    volumes:
+      - ./:/app/
+    networks:
+      - chroma-net
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  # chroma:
+  #   image: ghcr.io/chroma-core/chroma:latest
+  #   volumes:
+  #     - index_data:/chroma/.chroma/index
+  #   ports:
+  #     - 8000:8000
+  #   networks:
+  #     - chroma-net
+
+volumes:
+  index_data:
+    driver: local
+  backups:
+    driver: local
+
+networks:
+  chroma-net:
+    name: chroma_network
+    external: true

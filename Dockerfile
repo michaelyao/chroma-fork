@@ -25,7 +25,8 @@ COPY --from=builder /install /usr/local
 COPY ./bin/docker_entrypoint.sh /docker_entrypoint.sh
 COPY ./ /chroma
 
-RUN apt-get update --fix-missing && apt-get install -y curl && \
+
+RUN apt-get update --fix-missing && apt-get install -y curl iproute2 && \
     chmod +x /docker_entrypoint.sh && \
     rm -rf /var/lib/apt/lists/*
 

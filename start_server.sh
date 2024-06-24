@@ -1,0 +1,1 @@
+docker compose --env-file .chroma_env  up -d --build
