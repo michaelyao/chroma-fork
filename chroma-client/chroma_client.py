@@ -1,7 +1,7 @@
 import chromadb
 from chromadb.config import Settings
 
-chroma_client = chromadb.HttpClient(host="host.docker.internal", port = 8001, settings=Settings(allow_reset=True, anonymized_telemetry=False))
+chroma_client = chromadb.HttpClient(host="chroma_db_server", port = 8000, settings=Settings(allow_reset=True, anonymized_telemetry=False))
 documents = [
     "Mars, often called the 'Red Planet', has captured the imagination of scientists and space enthusiasts alike.",
     "The Hubble Space Telescope has provided us with breathtaking images of distant galaxies and nebulae.",
