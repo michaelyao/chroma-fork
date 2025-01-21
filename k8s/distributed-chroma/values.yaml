@@ -16,6 +16,7 @@ frontendService:
   producerImpl: 'value: "chromadb.logservice.logservice.LogService"'
   consumerImpl: 'value: "chromadb.logservice.logservice.LogService"'
   segmentManagerImpl: 'value: "chromadb.segment.impl.manager.distributed.DistributedSegmentManager"'
+  executorImpl: 'value: "chromadb.execution.executor.distributed.DistributedExecutor"'
   allowReset: 'value: "TRUE"'
   sysdbImpl: 'value: "chromadb.db.impl.grpc.client.GrpcSysDB"'
   serverGrpcPort: 'value: "50051"'
@@ -28,40 +29,60 @@ frontendService:
   logServiceHost: 'value: "logservice.chroma"'
   logServicePort: 'value: "50051"'
   otherEnvConfig: |
-      - name: CHROMA_OTEL_COLLECTION_ENDPOINT
-        value: "http://jaeger:4317"
-      - name: CHROMA_OTEL_GRANULARITY
-        value: all
+    - name: CHROMA_OTEL_COLLECTION_ENDPOINT
+      value: "http://jaeger:4317"
+    - name: CHROMA_OTEL_GRANULARITY
+      value: all
+  replicaCount: 2
 sysdb:
   image:
     repository: 'local'
     tag: 'sysdb'
   replicaCount: 1
   env:
-    - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "jaeger:4317"'
+  - name: OPTL_TRACING_ENDPOINT
+    value: 'value: "jaeger:4317"'
+  resources:
+    limits:
+      cpu: '2000m'
+      memory: '1Gi'
+    requests:
+      cpu: '1000m'
+      memory: '512Mi'
   flags:
+
 
 logService:
   image:
     repository: 'local'
-    tag: 'log-service'
+    tag: 'logservice'
   env:
-    - name: OPTL_TRACING_ENDPOINT
-      value: 'value: "jaeger:4317"'
+  - name: OPTL_TRACING_ENDPOINT
+    value: 'value: "otel-collector:4317"'
+  - name: SYSDB_CONN
+    value: 'value: "sysdb.chroma:50051"'
   flags:
+  replicaCount: 1
 
 queryService:
   image:
     repository: 'local'
     tag: 'query-service'
   env:
+  cache:
+    hostPath: '/local/cache/chroma'
+    mountPath: '/cache/'
+  replicaCount: 2
 
 compactionService:
   image:
     repository: 'local'
     tag: 'compaction-service'
   env:
+  cache:
+    hostPath: '/local/cache/chroma'
+    mountPath: '/cache/'
+  replicaCount: 1
 
 sysdbMigration:
   image:

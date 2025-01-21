@@ -13,7 +13,8 @@ message CreateDatabaseRequest {
 }
 
 message CreateDatabaseResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetDatabaseRequest {
@@ -23,15 +24,34 @@ message GetDatabaseRequest {
 
 message GetDatabaseResponse {
   Database database = 1;
-  Status status = 2;
+  reserved 2;
+  reserved "status";
 }
+
+message ListDatabasesRequest {
+  string tenant = 1;
+  optional int32 limit = 2;
+  optional int32 offset = 3;
+}
+
+message ListDatabasesResponse {
+  repeated Database databases = 1;
+}
+
+message DeleteDatabaseRequest {
+  string name = 1;
+  string tenant = 2;
+}
+
+message DeleteDatabaseResponse {}
 
 message CreateTenantRequest {
   string name = 2; // Names are globally unique
 }
 
 message CreateTenantResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetTenantRequest {
@@ -40,7 +60,8 @@ message GetTenantRequest {
 
 message GetTenantResponse {
   Tenant tenant = 1;
-  Status status = 2;
+  reserved 2;
+  reserved "status";
 }
 
 
@@ -49,36 +70,37 @@ message CreateSegmentRequest {
 }
 
 message CreateSegmentResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message DeleteSegmentRequest {
   string id = 1;
+  string collection = 2;
 }
 
 message DeleteSegmentResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetSegmentsRequest {
   optional string id = 1;
   optional string type = 2;
   optional SegmentScope scope = 3;
-  optional string collection = 5; // Collection ID
+  string collection = 4; // Collection ID
 }
 
 message GetSegmentsResponse {
   repeated Segment segments = 1;
-  Status status = 2;
+  reserved 2;
+  reserved "status";
 }
 
 
 message UpdateSegmentRequest {
   string id = 1;
-  oneof collection_update {
-    string collection = 4;
-    bool reset_collection = 5;
-  }
+  string collection = 4;
   oneof metadata_update {
     UpdateMetadata metadata = 6;
     bool reset_metadata = 7;
@@ -86,33 +108,41 @@ message UpdateSegmentRequest {
 }
 
 message UpdateSegmentResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message CreateCollectionRequest {
   string id = 1;
   string name = 2;
-  optional UpdateMetadata metadata = 3;
-  optional int32 dimension = 4;
-  optional bool get_or_create = 5;
-  string tenant = 6;
-  string database = 7;
+  string configuration_json_str = 3;
+  optional UpdateMetadata metadata = 4;
+  optional int32 dimension = 5;
+  optional bool get_or_create = 6;
+  string tenant = 7;
+  string database = 8;
+  // When segments are set, then the collection and segments will be created as
+  // a single atomic operation.
+  repeated Segment segments = 9;  // Optional.
 }
 
 message CreateCollectionResponse {
   Collection collection = 1;
   bool created = 2;
-  Status status = 3;
+  reserved 3;
+  reserved "status";
 }
 
 message DeleteCollectionRequest {
   string id = 1;
   string tenant = 2;
   string database = 3;
+  repeated string segment_ids = 4;
 }
 
 message DeleteCollectionResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetCollectionsRequest {
@@ -126,7 +156,25 @@ message GetCollectionsRequest {
 
 message GetCollectionsResponse {
   repeated Collection collections = 1;
-  Status status = 2;
+  reserved 2;
+  reserved "status";
+}
+
+message GetCollectionWithSegmentsRequest {
+  string id = 1;
+}
+
+message GetCollectionWithSegmentsResponse {
+  Collection collection = 1;
+  repeated Segment segments = 2;
+}
+
+message CheckCollectionsRequest {
+  repeated string collection_ids = 1;
+}
+
+message CheckCollectionsResponse {
+  repeated bool deleted = 1;
 }
 
 message UpdateCollectionRequest {
@@ -140,18 +188,13 @@ message UpdateCollectionRequest {
 }
 
 message UpdateCollectionResponse {
-  Status status = 1;
-}
-
-message Notification {
-  int64 id = 1;
-  string collection_id = 2;
-  string type = 3;
-  string status = 4;
+  reserved 1;
+  reserved "status";
 }
 
 message ResetStateResponse {
-  Status status = 1;
+  reserved 1;
+  reserved "status";
 }
 
 message GetLastCompactionTimeForTenantRequest {
@@ -182,6 +225,7 @@ message FlushCollectionCompactionRequest {
   int64 log_position = 3;
   int32 collection_version = 4;
   repeated FlushSegmentCompactionInfo segment_compaction_info = 5;
+  uint64 total_records_post_compaction = 6;
 }
 
 message FlushCollectionCompactionResponse {
@@ -190,9 +234,146 @@ message FlushCollectionCompactionResponse {
   int64 last_compaction_time = 3;
 }
 
+// Used for serializing contents in collection version history file.
+message CollectionVersionFile {
+  CollectionInfoImmutable collection_info_immutable = 1;
+  CollectionVersionHistory version_history = 2;
+}
+
+// This is metadata about the Collection that is fixed at creation time.
+message CollectionInfoImmutable {
+  string tenant_id = 1;
+  string database_id = 2;
+  // This is the database name at the time of creation.
+  // This will not be updated if the database name is changed.
+  string database_name = 3;
+  bool is_deleted = 4;
+  int32 dimension = 5;
+  string collection_id = 6;
+  // This is the collection name at the time of creation.
+  // This will not be updated if the collection name is changed.
+  string collection_name = 7;
+  int64 collection_creation_secs = 8;
+}
+
+// Contains information about the version history of a collection.
+message CollectionVersionHistory {
+  // List of versions of the collection.
+  repeated CollectionVersionInfo versions = 1;
+}
+
+// Contains information about a collection at a particular version.
+// Currently, new versions are ONLY created by data compaction.
+message CollectionVersionInfo {
+  int64 version = 1;
+  // Information about segments that are part of this version.
+  // Contains file paths for each segment.
+  CollectionSegmentInfo segment_info = 2;
+  // Metadata about the collection at this version.
+  // If there are multiple updates to this information in between compactions,
+  // then they are not reflected in the version history.
+  CollectionInfoMutable collection_info_mutable = 3;
+  // Timestamp at which this version was created.
+  int64 created_at_secs = 4;
+  // Reason for the version change.
+  // NOTE: As of now, we only support version change due to data compaction.
+  // There is a good chance to include other reasons in the future, especially
+  // for DDL operations, recovery, etc.
+  enum VersionChangeReason {
+    VERSION_CHANGE_REASON_DATA_COMPACTION = 0;
+  }
+  VersionChangeReason version_change_reason = 5;
+}
+
+// This is metadata about the Collection that is mutable.
+// This does not contain information about segments.
+// TODO(rohitcp): Add more fields here to help with Restore.
+message CollectionInfoMutable {
+  int64 current_log_position = 1;
+  int64 current_collection_version = 2;
+  int64 updated_at_secs = 3;
+  int64 last_compaction_time_secs = 4;
+  int64 dimension = 5;
+}
+
+// Contains information about a collection at a particular version.
+message CollectionSegmentInfo {
+    // Information about segments that are part of this version.
+    // Contains file paths for each segment.
+    repeated FlushSegmentCompactionInfo segments = 2;
+    // TODO(rohitcp): Add additional information from Compaction about the
+    // number of files creates, and other helpful information that can help with
+    // GC's {collection,version} selection policy.
+}
+
+// Tuple of collection ID, tenant ID, and version.
+message CollectionVersionTuple {
+    string collection_id = 1;
+    string tenant_id = 2;
+    int64 version = 3;
+}
+
+// Contains information about the lineage of a collection.
+message CollectionLineageInfo {
+    // ID of the collection.
+    string collection_id = 1;
+    // ID of the tenant.
+    string tenant_id = 2;
+    // Whether the collection is a root collection.
+    bool is_root_collection = 3;
+    // An ordered list of descendant collections.
+    // The first element is the root {collection, version}, and the last
+    // element is the direct parent of the current collection.
+    repeated CollectionVersionTuple parent_collections = 4;
+}
+
+// Request to list versions of a collection.
+message ListCollectionVersionsRequest {
+  string collection_id = 1;
+  string tenant_id = 2;
+  // Maximum number of versions to return.
+  optional int64 max_count = 3;
+  // Only return versions before this timestamp.
+  optional int64 versions_before = 4;
+  // Only return versions at or after this timestamp.
+  // Together with versions_before, this forms an inclusive range.
+  optional int64 versions_at_or_after = 5;
+}
+
+// Response to ListCollectionVersionsRequest.
+message ListCollectionVersionsResponse {
+  repeated CollectionVersionInfo versions = 1;
+  // Whether the list is truncated.
+  bool list_is_truncated = 2;
+}
+
+// Request to restore a collection.
+message RestoreCollectionRequest {
+  string collection_id = 1;
+  string tenant_id = 2;
+  // Version of the collection to restore.
+  int64 version_to_restore = 3;
+}
+
+// Response to RestoreCollectionRequest.
+message RestoreCollectionResponse {
+  // Version of the new collection.
+  int64 new_collection_version = 1;
+}
+
+message GetCollectionSizeRequest {
+  string id = 1;
+}
+
+message GetCollectionSizeResponse {
+  uint64 total_records_post_compaction = 1;
+}
+
 service SysDB {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse) {}
   rpc GetDatabase(GetDatabaseRequest) returns (GetDatabaseResponse) {}
+  rpc ListDatabases(ListDatabasesRequest) returns (ListDatabasesResponse) {}
+  rpc DeleteDatabase(DeleteDatabaseRequest) returns (DeleteDatabaseResponse) {}
   rpc CreateTenant(CreateTenantRequest) returns (CreateTenantResponse) {}
   rpc GetTenant(GetTenantRequest) returns (GetTenantResponse) {}
   rpc CreateSegment(CreateSegmentRequest) returns (CreateSegmentResponse) {}
@@ -202,9 +383,14 @@ service SysDB {
   rpc CreateCollection(CreateCollectionRequest) returns (CreateCollectionResponse) {}
   rpc DeleteCollection(DeleteCollectionRequest) returns (DeleteCollectionResponse) {}
   rpc GetCollections(GetCollectionsRequest) returns (GetCollectionsResponse) {}
+  rpc GetCollectionWithSegments(GetCollectionWithSegmentsRequest) returns (GetCollectionWithSegmentsResponse) {}
+  rpc CheckCollections(CheckCollectionsRequest) returns (CheckCollectionsResponse) {}
   rpc UpdateCollection(UpdateCollectionRequest) returns (UpdateCollectionResponse) {}
   rpc ResetState(google.protobuf.Empty) returns (ResetStateResponse) {}
   rpc GetLastCompactionTimeForTenant(GetLastCompactionTimeForTenantRequest) returns (GetLastCompactionTimeForTenantResponse) {}
   rpc SetLastCompactionTimeForTenant(SetLastCompactionTimeForTenantRequest) returns (google.protobuf.Empty) {}
   rpc FlushCollectionCompaction(FlushCollectionCompactionRequest) returns (FlushCollectionCompactionResponse) {}
+  rpc RestoreCollection(RestoreCollectionRequest) returns (RestoreCollectionResponse) {}
+  rpc ListCollectionVersions(ListCollectionVersionsRequest) returns (ListCollectionVersionsResponse) {}
+  rpc GetCollectionSize(GetCollectionSizeRequest) returns (GetCollectionSizeResponse) {}
 }

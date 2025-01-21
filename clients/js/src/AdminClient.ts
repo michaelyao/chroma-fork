@@ -1,5 +1,5 @@
 import { Configuration, ApiApi as DefaultApi } from "./generated";
-import { handleSuccess, validateTenantDatabase } from "./utils";
+import { validateTenantDatabase } from "./utils";
 import { ConfigOptions } from "./types";
 import {
   AuthOptions,
@@ -16,8 +16,9 @@ interface Tenant {
   name: string;
 }
 
-// interface for tenant
 interface Database {
+  id: string;
+  tenant: string;
   name: string;
 }
 
@@ -70,10 +71,6 @@ export class AdminClient {
 
     if (auth !== undefined) {
       this.authProvider = authOptionsToAuthProvider(auth);
-      this.api.options.headers = {
-        ...this.api.options.headers,
-        ...this.authProvider.authenticate(),
-      };
       this.api.options.headers = {
         ...this.api.options.headers,
         ...this.authProvider.authenticate(),
@@ -153,16 +150,9 @@ export class AdminClient {
    * ```
    */
   public async createTenant({ name }: { name: string }): Promise<Tenant> {
-    const newTenant = await this.api
-      .createTenant({ name }, this.api.options)
-      .then(handleSuccess);
+    await this.api.createTenant({ name }, this.api.options);
 
-    // newTenant is null if successful
-    if (newTenant && newTenant.error) {
-      throw new Error(newTenant.error);
-    }
-
-    return { name: name } as Tenant;
+    return { name };
   }
 
   /**
@@ -182,15 +172,12 @@ export class AdminClient {
    * ```
    */
   public async getTenant({ name }: { name: string }): Promise<Tenant> {
-    const getTenant = await this.api
-      .getTenant(name, this.api.options)
-      .then(handleSuccess);
+    const getTenant = (await this.api.getTenant(
+      name,
+      this.api.options,
+    )) as Tenant;
 
-    if (getTenant.error) {
-      throw new Error(getTenant.error);
-    }
-
-    return { name: getTenant.name } as Tenant;
+    return { name: getTenant.name };
   }
 
   /**
@@ -217,17 +204,10 @@ export class AdminClient {
   }: {
     name: string;
     tenantName: string;
-  }): Promise<Database> {
-    const newDatabase = await this.api
-      .createDatabase(tenantName, { name }, this.api.options)
-      .then(handleSuccess);
+  }): Promise<{ name: string }> {
+    await this.api.createDatabase(tenantName, { name }, this.api.options);
 
-    // newDatabase is null if successful
-    if (newDatabase && newDatabase.error) {
-      throw new Error(newDatabase.error);
-    }
-
-    return { name: name } as Database;
+    return { name };
   }
 
   /**
@@ -255,14 +235,59 @@ export class AdminClient {
     name: string;
     tenantName: string;
   }): Promise<Database> {
-    const getDatabase = await this.api
-      .getDatabase(name, tenantName, this.api.options)
-      .then(handleSuccess);
+    const result = (await this.api.getDatabase(
+      name,
+      tenantName,
+      this.api.options,
+    )) as Database;
 
-    if (getDatabase.error) {
-      throw new Error(getDatabase.error);
-    }
+    return result;
+  }
 
-    return { name: getDatabase.name } as Database;
+  /**
+   * Deletes a database.
+   *
+   * @param {Object} params - The parameters for deleting a database.
+   * @param {string} params.name - The name of the database.
+   * @param {string} params.tenantName - The name of the tenant.
+   *
+   * @returns {Promise<void>} A promise that returns nothing.
+   * @throws {Error} If there is an issue deleting the database.
+   */
+  public async deleteDatabase({
+    name,
+    tenantName,
+  }: {
+    name: string;
+    tenantName: string;
+  }): Promise<void> {
+    await this.api.deleteDatabase(name, tenantName, this.api.options);
+  }
+
+  /**
+   * Lists database for a specific tenant.
+   *
+   * @param {Object} params - The parameters for listing databases.
+   * @param {number} [params.limit] - The maximum number of databases to return.
+   * @param {number} [params.offset] - The number of databases to skip.
+   *
+   * @returns {Promise<Database[]>} A promise that resolves to a list of databases.
+   * @throws {Error} If there is an issue listing the databases.
+   */
+  public async listDatabases({
+    limit,
+    offset,
+    tenantName,
+  }: {
+    limit?: number;
+    offset?: number;
+    tenantName: string;
+  }): Promise<Database[]> {
+    return (await this.api.listDatabases(
+      tenantName,
+      limit,
+      offset,
+      this.api.options,
+    )) as Database[];
   }
 }

@@ -1,9 +1,9 @@
-mod common;
 mod compact;
-mod get_vectors;
-mod hnsw;
-mod metadata;
+mod count;
+mod spann_knn;
 pub(crate) use compact::*;
-pub(crate) use get_vectors::*;
-pub(crate) use hnsw::*;
-pub(crate) use metadata::*;
+pub(crate) use count::*;
+
+pub mod get;
+pub mod knn;
+pub mod knn_filter;

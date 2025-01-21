@@ -12,9 +12,11 @@ var (
 	// Database errors
 	ErrDatabaseNotFound                  = errors.New("database not found")
 	ErrDatabaseUniqueConstraintViolation = errors.New("database unique constraint violation")
+	ErrDatabaseNameEmpty                 = errors.New("database name is empty")
 
 	// Collection errors
 	ErrCollectionNotFound                    = errors.New("collection not found")
+	ErrCollectionSoftDeleted                 = errors.New("collection soft deleted")
 	ErrCollectionIDFormat                    = errors.New("collection id format error")
 	ErrCollectionNameEmpty                   = errors.New("collection name is empty")
 	ErrCollectionUniqueConstraintViolation   = errors.New("collection unique constraint violation")
@@ -30,6 +32,7 @@ var (
 	// Segment errors
 	ErrSegmentIDFormat                  = errors.New("segment id format error")
 	ErrInvalidCollectionUpdate          = errors.New("invalid collection update, reset collection true and collection value not empty")
+	ErrMissingCollectionID              = errors.New("missing collection id")
 	ErrSegmentUniqueConstraintViolation = errors.New("unique constraint violation")
 	ErrSegmentDeleteNonExistingSegment  = errors.New("delete non existing segment")
 	ErrSegmentUpdateNonExistingSegment  = errors.New("update non existing segment")

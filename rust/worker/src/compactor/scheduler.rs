@@ -1,3 +1,13 @@
+use std::collections::HashSet;
+use std::str::FromStr;
+
+use chroma_sysdb::SysDb;
+use chroma_types::CollectionUuid;
+use figment::providers::Env;
+use figment::Figment;
+use serde::Deserialize;
+use uuid::Uuid;
+
 use crate::assignment::assignment_policy::AssignmentPolicy;
 use crate::compactor::scheduler_policy::SchedulerPolicy;
 use crate::compactor::types::CompactionJob;
@@ -5,8 +15,6 @@ use crate::log::log::CollectionInfo;
 use crate::log::log::CollectionRecord;
 use crate::log::log::Log;
 use crate::memberlist::Memberlist;
-use crate::sysdb::sysdb::SysDb;
-use uuid::Uuid;
 
 pub(crate) struct Scheduler {
     my_ip: String,
@@ -18,9 +26,16 @@ pub(crate) struct Scheduler {
     min_compaction_size: usize,
     memberlist: Option<Memberlist>,
     assignment_policy: Box<dyn AssignmentPolicy>,
+    disabled_collections: HashSet<CollectionUuid>,
+}
+
+#[derive(Deserialize, Debug)]
+struct RunTimeConfig {
+    disabled_collections: Vec<String>,
 }
 
 impl Scheduler {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         my_ip: String,
         log: Box<Log>,
@@ -29,6 +44,7 @@ impl Scheduler {
         max_concurrent_jobs: usize,
         min_compaction_size: usize,
         assignment_policy: Box<dyn AssignmentPolicy>,
+        disabled_collections: HashSet<CollectionUuid>,
     ) -> Scheduler {
         Scheduler {
             my_ip,
@@ -40,6 +56,7 @@ impl Scheduler {
             max_concurrent_jobs,
             memberlist: None,
             assignment_policy,
+            disabled_collections,
         }
     }
 
@@ -48,16 +65,14 @@ impl Scheduler {
             .log
             .get_collections_with_new_data(self.min_compaction_size as u64)
             .await;
-        // TODO: filter collecitons based on memberlist
-        let collections = match collections {
+
+        match collections {
             Ok(collections) => collections,
             Err(e) => {
-                // TODO: Log error
-                println!("Error: {:?}", e);
-                return Vec::new();
+                tracing::error!("Error: {:?}", e);
+                Vec::new()
             }
-        };
-        collections
+        }
     }
 
     async fn verify_and_enrich_collections(
@@ -66,13 +81,17 @@ impl Scheduler {
     ) -> Vec<CollectionRecord> {
         let mut collection_records = Vec::new();
         for collection_info in collections {
-            let collection_id = Uuid::parse_str(collection_info.collection_id.as_str());
-            if collection_id.is_err() {
-                // TODO: Log error
-                println!("Error: {:?}", collection_id.err());
+            if self
+                .disabled_collections
+                .contains(&collection_info.collection_id)
+            {
+                tracing::info!(
+                    "Ignoring collection: {:?} because it disabled for compaction",
+                    collection_info.collection_id
+                );
                 continue;
             }
-            let collection_id = Some(collection_id.unwrap());
+            let collection_id = Some(collection_info.collection_id);
             // TODO: add a cache to avoid fetching the same collection multiple times
             let result = self
                 .sysdb
@@ -82,8 +101,10 @@ impl Scheduler {
             match result {
                 Ok(collection) => {
                     if collection.is_empty() {
-                        // TODO: Log error
-                        println!("Collection not found: {:?}", collection_info.collection_id);
+                        tracing::error!(
+                            "Collection not found: {:?}",
+                            collection_info.collection_id
+                        );
                         continue;
                     }
 
@@ -95,10 +116,12 @@ impl Scheduler {
                     let last_compaction_time = match tenant {
                         Ok(tenant) => tenant[0].last_compaction_time,
                         Err(e) => {
-                            // TODO: Log error
-                            println!("Error: {:?}", e);
+                            tracing::error!("Error: {:?}", e);
                             // Ignore this collection id for this compaction iteration
-                            println!("Ignoring collection: {:?}", collection_info.collection_id);
+                            tracing::info!(
+                                "Ignoring collection: {:?}",
+                                collection_info.collection_id
+                            );
                             continue;
                         }
                     };
@@ -118,7 +141,7 @@ impl Scheduler {
                     }
 
                     collection_records.push(CollectionRecord {
-                        id: collection[0].id,
+                        collection_id: collection[0].collection_id,
                         tenant_id: collection[0].tenant.clone(),
                         last_compaction_time,
                         first_record_time: collection_info.first_log_ts,
@@ -127,8 +150,7 @@ impl Scheduler {
                     });
                 }
                 Err(e) => {
-                    // TODO: Log error
-                    println!("Error: {:?}", e);
+                    tracing::error!("Error: {:?}", e);
                 }
             }
         }
@@ -142,7 +164,8 @@ impl Scheduler {
         for collection in collections {
             let result = self
                 .assignment_policy
-                .assign(collection.id.to_string().as_str());
+                // NOTE(rescrv):  Need to use the untyped uuid here.
+                .assign(collection.collection_id.0.to_string().as_str());
             match result {
                 Ok(member) => {
                     if member == self.my_ip {
@@ -150,8 +173,7 @@ impl Scheduler {
                     }
                 }
                 Err(e) => {
-                    // TODO: Log error
-                    println!("Error: {:?}", e);
+                    tracing::error!("Error: {:?}", e);
                     continue;
                 }
             }
@@ -167,14 +189,39 @@ impl Scheduler {
         self.job_queue.extend(jobs);
     }
 
+    pub(crate) fn recompute_disabled_collections(&mut self) {
+        let config = Figment::new()
+            .merge(
+                Env::prefixed("CHROMA_")
+                    .map(|k| k.as_str().replace("__", ".").into())
+                    .map(|k| {
+                        if k == "COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS" {
+                            k["COMPACTION_SERVICE.COMPACTOR.".len()..].into()
+                        } else {
+                            k.into()
+                        }
+                    })
+                    .only(&["DISABLED_COLLECTIONS"]),
+            )
+            .extract::<RunTimeConfig>();
+        if let Ok(config) = config {
+            self.disabled_collections = config
+                .disabled_collections
+                .iter()
+                .map(|collection| CollectionUuid(Uuid::from_str(collection).unwrap()))
+                .collect();
+        }
+    }
+
     pub(crate) async fn schedule(&mut self) {
         // For now, we clear the job queue every time, assuming we will not have any pending jobs running
         self.job_queue.clear();
         if self.memberlist.is_none() || self.memberlist.as_ref().unwrap().is_empty() {
-            // TODO: Log error
-            println!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
+            tracing::error!("Memberlist is not set or empty. Cannot schedule compaction jobs.");
             return;
         }
+        // Recompute disabled list.
+        self.recompute_disabled_collections();
         let collections = self.get_collections_with_new_data().await;
         if collections.is_empty() {
             return;
@@ -194,31 +241,30 @@ impl Scheduler {
 
 #[cfg(test)]
 mod tests {
+    use std::str::FromStr;
+
     use super::*;
     use crate::assignment::assignment_policy::RendezvousHashingAssignmentPolicy;
     use crate::compactor::scheduler_policy::LasCompactionTimeSchedulerPolicy;
     use crate::log::log::InMemoryLog;
     use crate::log::log::InternalLogRecord;
-    use crate::sysdb::test_sysdb::TestSysDb;
-    use crate::types::Collection;
-    use crate::types::LogRecord;
-    use crate::types::Operation;
-    use crate::types::OperationRecord;
-    use std::str::FromStr;
+    use chroma_sysdb::TestSysDb;
+    use chroma_types::{Collection, CollectionUuid, LogRecord, Operation, OperationRecord};
 
     #[tokio::test]
     async fn test_scheduler() {
         let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let mut in_memory_log = match *log {
+        let in_memory_log = match *log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
             _ => panic!("Invalid log type"),
         };
 
-        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_1 =
+            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
@@ -232,14 +278,15 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
 
-        let collection_uuid_2 = Uuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
+        let collection_uuid_2 =
+            CollectionUuid::from_str("00000000-0000-0000-0000-000000000002").unwrap();
         in_memory_log.add_log(
-            collection_uuid_2.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_2.clone(),
+            collection_uuid_2,
+            InternalLogRecord {
+                collection_id: collection_uuid_2,
                 log_offset: 0,
                 log_ts: 2,
                 record: LogRecord {
@@ -253,14 +300,14 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
 
         let mut sysdb = Box::new(SysDb::Test(TestSysDb::new()));
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            id: collection_uuid_1,
+            collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
@@ -268,11 +315,12 @@ mod tests {
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
 
         let tenant_2 = "tenant_2".to_string();
         let collection_2 = Collection {
-            id: collection_uuid_2,
+            collection_id: collection_uuid_2,
             name: "collection_2".to_string(),
             metadata: None,
             dimension: Some(1),
@@ -280,6 +328,7 @@ mod tests {
             database: "database_2".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
         match *sysdb {
             SysDb::Test(ref mut sysdb) => {
@@ -307,6 +356,7 @@ mod tests {
             max_concurrent_jobs,
             1,
             assignment_policy,
+            HashSet::new(),
         );
         // Scheduler does nothing without memberlist
         scheduler.schedule().await;
@@ -345,6 +395,39 @@ mod tests {
         assert_eq!(jobs[0].collection_id, collection_uuid_2,);
         assert_eq!(jobs[1].collection_id, collection_uuid_1,);
 
+        // Set disable list.
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+            "[\"00000000-0000-0000-0000-000000000001\"]",
+        );
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_uuid_2,);
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE__COMPACTOR__DISABLED_COLLECTIONS",
+            "[]",
+        );
+        // Even . should work.
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
+            "[\"00000000-0000-0000-0000-000000000002\"]",
+        );
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.IRRELEVANT",
+            "[\"00000000-0000-0000-0000-000000000001\"]",
+        );
+        scheduler.schedule().await;
+        let jobs = scheduler.get_jobs();
+        let jobs = jobs.collect::<Vec<&CompactionJob>>();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].collection_id, collection_uuid_1,);
+        std::env::set_var(
+            "CHROMA_COMPACTION_SERVICE.COMPACTOR.DISABLED_COLLECTIONS",
+            "[]",
+        );
+
         // Test filter_collections
         let member_1 = "1".to_string();
         let member_2 = "5".to_string();
@@ -361,16 +444,17 @@ mod tests {
     )]
     async fn test_scheduler_panic() {
         let mut log = Box::new(Log::InMemory(InMemoryLog::new()));
-        let mut in_memory_log = match *log {
+        let in_memory_log = match *log {
             Log::InMemory(ref mut in_memory_log) => in_memory_log,
             _ => panic!("Invalid log type"),
         };
 
-        let collection_uuid_1 = Uuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
+        let collection_uuid_1 =
+            CollectionUuid::from_str("00000000-0000-0000-0000-000000000001").unwrap();
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 0,
                 log_ts: 1,
                 record: LogRecord {
@@ -384,12 +468,12 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 1,
                 log_ts: 2,
                 record: LogRecord {
@@ -403,12 +487,12 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 2,
                 log_ts: 3,
                 record: LogRecord {
@@ -422,12 +506,12 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
         in_memory_log.add_log(
-            collection_uuid_1.clone(),
-            Box::new(InternalLogRecord {
-                collection_id: collection_uuid_1.clone(),
+            collection_uuid_1,
+            InternalLogRecord {
+                collection_id: collection_uuid_1,
                 log_offset: 3,
                 log_ts: 4,
                 record: LogRecord {
@@ -441,7 +525,7 @@ mod tests {
                         operation: Operation::Add,
                     },
                 },
-            }),
+            },
         );
         let _ = log.update_collection_log_offset(collection_uuid_1, 2).await;
 
@@ -449,7 +533,7 @@ mod tests {
 
         let tenant_1 = "tenant_1".to_string();
         let collection_1 = Collection {
-            id: collection_uuid_1,
+            collection_id: collection_uuid_1,
             name: "collection_1".to_string(),
             metadata: None,
             dimension: Some(1),
@@ -457,6 +541,7 @@ mod tests {
             database: "database_1".to_string(),
             log_position: 0,
             version: 0,
+            total_records_post_compaction: 0,
         };
 
         match *sysdb {
@@ -483,6 +568,7 @@ mod tests {
             max_concurrent_jobs,
             1,
             assignment_policy,
+            HashSet::new(),
         );
 
         scheduler.set_memberlist(vec![my_ip.clone()]);

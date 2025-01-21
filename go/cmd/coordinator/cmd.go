@@ -4,8 +4,8 @@ import (
 	"io"
 	"time"
 
-	"github.com/chroma-core/chroma/go/pkg/coordinator/grpc"
 	"github.com/chroma-core/chroma/go/pkg/grpcutils"
+	"github.com/chroma-core/chroma/go/pkg/sysdb/grpc"
 
 	"github.com/chroma-core/chroma/go/cmd/flag"
 	"github.com/chroma-core/chroma/go/pkg/utils"
@@ -29,26 +29,30 @@ func init() {
 
 	// GRPC
 	flag.GRPCAddr(Cmd, &conf.GrpcConfig.BindAddress)
+	Cmd.Flags().Uint32Var(&conf.GrpcConfig.MaxConcurrentStreams, "max-concurrent-streams", 100, "Max concurrent streams")
+	Cmd.Flags().Uint32Var(&conf.GrpcConfig.NumStreamWorkers, "num-stream-workers", 100, "Number of stream workers")
 
 	// System Catalog
 	Cmd.Flags().StringVar(&conf.SystemCatalogProvider, "system-catalog-provider", "database", "System catalog provider")
 	Cmd.Flags().StringVar(&conf.DBConfig.Username, "username", "chroma", "MetaTable username")
 	Cmd.Flags().StringVar(&conf.DBConfig.Password, "password", "chroma", "MetaTable password")
 	Cmd.Flags().StringVar(&conf.DBConfig.Address, "db-address", "postgres", "MetaTable db address")
+	Cmd.Flags().StringVar(&conf.DBConfig.ReadAddress, "read-db-address", "postgres", "MetaTable db read only address")
 	Cmd.Flags().IntVar(&conf.DBConfig.Port, "db-port", 5432, "MetaTable db port")
 	Cmd.Flags().StringVar(&conf.DBConfig.DBName, "db-name", "sysdb", "MetaTable db name")
 	Cmd.Flags().IntVar(&conf.DBConfig.MaxIdleConns, "max-idle-conns", 10, "MetaTable max idle connections")
 	Cmd.Flags().IntVar(&conf.DBConfig.MaxOpenConns, "max-open-conns", 10, "MetaTable max open connections")
 	Cmd.Flags().StringVar(&conf.DBConfig.SslMode, "ssl-mode", "disable", "SSL mode for database connection")
 
-	// Notification
-	Cmd.Flags().StringVar(&conf.NotificationStoreProvider, "notification-store-provider", "memory", "Notification store provider")
-	Cmd.Flags().StringVar(&conf.NotifierProvider, "notifier-provider", "memory", "Notifier provider")
-	Cmd.Flags().StringVar(&conf.NotificationTopic, "notification-topic", "chroma-notification", "Notification topic")
+	// Soft deletes
+	Cmd.Flags().BoolVar(&conf.SoftDeleteEnabled, "soft-delete-enabled", false, "Enable soft deletes")
+	Cmd.Flags().DurationVar(&conf.SoftDeleteCleanupInterval, "soft-delete-cleanup-interval", 1*time.Minute, "Soft delete cleanup interval")
+	Cmd.Flags().DurationVar(&conf.SoftDeleteMaxAge, "soft-delete-max-age", 72*time.Hour, "Soft delete max age")
+	Cmd.Flags().UintVar(&conf.SoftDeleteCleanupBatchSize, "soft-delete-cleanup-batch-size", 10, "Soft delete cleanup batch size")
 
 	// Memberlist
 	Cmd.Flags().StringVar(&conf.KubernetesNamespace, "kubernetes-namespace", "chroma", "Kubernetes namespace")
-	Cmd.Flags().DurationVar(&conf.ReconcileInterval, "reconcile-interval", 5*time.Second, "Reconcile interval")
+	Cmd.Flags().DurationVar(&conf.ReconcileInterval, "reconcile-interval", 100*time.Millisecond, "Reconcile interval")
 	Cmd.Flags().UintVar(&conf.ReconcileCount, "reconcile-count", 10, "Reconcile count")
 
 	// Query service memberlist

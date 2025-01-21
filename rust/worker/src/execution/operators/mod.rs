@@ -1,13 +1,23 @@
-pub(super) mod brute_force_knn;
+pub mod apply_log_to_segment_writer;
+pub mod commit_segment_writer;
 pub(super) mod count_records;
-pub(super) mod flush_s3;
-pub(super) mod get_vectors_operator;
-pub(super) mod hnsw_knn;
-pub(super) mod merge_knn_results;
-pub(super) mod merge_metadata_results;
-pub(super) mod metadata_filtering;
-pub(super) mod normalize_vectors;
+pub mod flush_segment_writer;
+pub mod materialize_logs;
 pub(super) mod partition;
-pub(super) mod pull_log;
 pub(super) mod register;
-pub(super) mod write_segments;
+pub mod spann_bf_pl;
+pub(super) mod spann_centers_search;
+pub(super) mod spann_fetch_pl;
+pub mod spann_knn_merge;
+
+// Required for benchmark
+pub mod fetch_log;
+pub mod filter;
+pub mod knn;
+pub mod knn_hnsw;
+pub mod knn_log;
+pub mod knn_merge;
+pub mod knn_projection;
+pub mod limit;
+pub mod prefetch_record;
+pub mod projection;

@@ -1,33 +1,23 @@
 mod assignment;
-mod blockstore;
 mod compactor;
-mod config;
-pub mod distance;
-mod errors;
-mod execution;
-mod index;
-mod log;
 mod memberlist;
-mod segment;
 mod server;
-mod storage;
-mod sysdb;
-mod system;
 mod tracing;
-mod types;
 mod utils;
 
-use config::Configurable;
+use chroma_config::Configurable;
 use memberlist::MemberlistProvider;
 
 use tokio::select;
 use tokio::signal::unix::{signal, SignalKind};
 
-const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
+// Required for benchmark
+pub mod config;
+pub mod execution;
+pub mod log;
+pub mod segment;
 
-mod chroma_proto {
-    tonic::include_proto!("chroma");
-}
+const CONFIG_PATH_ENV_VAR: &str = "CONFIG_PATH";
 
 pub async fn query_service_entrypoint() {
     // Check if the config path is set in the env var
@@ -43,15 +33,14 @@ pub async fn query_service_entrypoint() {
         &config.otel_endpoint,
     );
 
-    let system: system::System = system::System::new();
-    let dispatcher =
-        match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
-            Ok(dispatcher) => dispatcher,
-            Err(err) => {
-                println!("Failed to create dispatcher component: {:?}", err);
-                return;
-            }
-        };
+    let system = chroma_system::System::new();
+    let dispatcher = match chroma_system::Dispatcher::try_from_config(&config.dispatcher).await {
+        Ok(dispatcher) => dispatcher,
+        Err(err) => {
+            println!("Failed to create dispatcher component: {:?}", err);
+            return;
+        }
+    };
     let mut dispatcher_handle = system.start_component(dispatcher);
     let mut worker_server = match server::WorkerServer::try_from_config(&config).await {
         Ok(worker_server) => worker_server,
@@ -61,7 +50,7 @@ pub async fn query_service_entrypoint() {
         }
     };
     worker_server.set_system(system.clone());
-    worker_server.set_dispatcher(dispatcher_handle.receiver());
+    worker_server.set_dispatcher(dispatcher_handle.clone());
 
     let server_join_handle = tokio::spawn(async move {
         let _ = crate::server::WorkerServer::run(worker_server).await;
@@ -81,9 +70,10 @@ pub async fn query_service_entrypoint() {
         // TODO: add more signal handling
         _ = sigterm.recv() => {
             dispatcher_handle.stop();
-            dispatcher_handle.join().await;
+            let _ = dispatcher_handle.join().await;
             system.stop().await;
             system.join().await;
+            let _ = server_join_handle.await;
         },
     };
     println!("Server stopped");
@@ -103,7 +93,7 @@ pub async fn compaction_service_entrypoint() {
         &config.otel_endpoint,
     );
 
-    let system: system::System = system::System::new();
+    let system = chroma_system::System::new();
 
     let mut memberlist = match memberlist::CustomResourceMemberlistProvider::try_from_config(
         &config.memberlist_provider,
@@ -117,14 +107,13 @@ pub async fn compaction_service_entrypoint() {
         }
     };
 
-    let dispatcher =
-        match execution::dispatcher::Dispatcher::try_from_config(&config.dispatcher).await {
-            Ok(dispatcher) => dispatcher,
-            Err(err) => {
-                println!("Failed to create dispatcher component: {:?}", err);
-                return;
-            }
-        };
+    let dispatcher = match chroma_system::Dispatcher::try_from_config(&config.dispatcher).await {
+        Ok(dispatcher) => dispatcher,
+        Err(err) => {
+            println!("Failed to create dispatcher component: {:?}", err);
+            return;
+        }
+    };
     let mut dispatcher_handle = system.start_component(dispatcher);
     let mut compaction_manager =
         match crate::compactor::CompactionManager::try_from_config(&config).await {
@@ -134,7 +123,7 @@ pub async fn compaction_service_entrypoint() {
                 return;
             }
         };
-    compaction_manager.set_dispatcher(dispatcher_handle.receiver());
+    compaction_manager.set_dispatcher(dispatcher_handle.clone());
     compaction_manager.set_system(system.clone());
 
     let mut compaction_manager_handle = system.start_component(compaction_manager);
@@ -155,11 +144,11 @@ pub async fn compaction_service_entrypoint() {
         // TODO: add more signal handling
         _ = sigterm.recv() => {
             memberlist_handle.stop();
-            memberlist_handle.join().await;
+            let _ = memberlist_handle.join().await;
             dispatcher_handle.stop();
-            dispatcher_handle.join().await;
+            let _ = dispatcher_handle.join().await;
             compaction_manager_handle.stop();
-            compaction_manager_handle.join().await;
+            let _ = compaction_manager_handle.join().await;
             system.stop().await;
             system.join().await;
         },

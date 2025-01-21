@@ -1,8 +1,10 @@
 from abc import abstractmethod
 from typing import Optional, Sequence, Tuple
 from uuid import UUID
+from chromadb.api.configuration import CollectionConfigurationInternal
 from chromadb.types import (
     Collection,
+    CollectionAndSegments,
     Database,
     Tenant,
     Metadata,
@@ -33,6 +35,21 @@ class SysDB(Component):
         pass
 
     @abstractmethod
+    def delete_database(self, name: str, tenant: str = DEFAULT_TENANT) -> None:
+        """Delete a database."""
+        pass
+
+    @abstractmethod
+    def list_databases(
+        self,
+        limit: Optional[int] = None,
+        offset: Optional[int] = None,
+        tenant: str = DEFAULT_TENANT,
+    ) -> Sequence[Database]:
+        """List all databases for a tenant."""
+        pass
+
+    @abstractmethod
     def create_tenant(self, name: str) -> None:
         """Create a new tenant in the System database. The name must be unique.
         Raises an Error if the Tenant already exists."""
@@ -43,6 +60,8 @@ class SysDB(Component):
         """Get a tenant by name. Raises an Error if the Tenant does not exist."""
         pass
 
+    # TODO: Investigate and remove this method, as segment creation is done as
+    # part of collection creation.
     @abstractmethod
     def create_segment(self, segment: Segment) -> None:
         """Create a new segment in the System database. Raises an Error if the ID
@@ -50,17 +69,17 @@ class SysDB(Component):
         pass
 
     @abstractmethod
-    def delete_segment(self, id: UUID) -> None:
-        """Create a new segment in the System database."""
+    def delete_segment(self, collection: UUID, id: UUID) -> None:
+        """Delete a segment from the System database."""
         pass
 
     @abstractmethod
     def get_segments(
         self,
+        collection: UUID,
         id: Optional[UUID] = None,
         type: Optional[str] = None,
         scope: Optional[SegmentScope] = None,
-        collection: Optional[UUID] = None,
     ) -> Sequence[Segment]:
         """Find segments by id, type, scope or collection."""
         pass
@@ -68,8 +87,8 @@ class SysDB(Component):
     @abstractmethod
     def update_segment(
         self,
+        collection: UUID,
         id: UUID,
-        collection: OptionalArgument[Optional[UUID]] = Unspecified(),
         metadata: OptionalArgument[Optional[UpdateMetadata]] = Unspecified(),
     ) -> None:
         """Update a segment. Unspecified fields will be left unchanged. For the
@@ -82,6 +101,8 @@ class SysDB(Component):
         self,
         id: UUID,
         name: str,
+        configuration: CollectionConfigurationInternal,
+        segments: Sequence[Segment],
         metadata: Optional[Metadata] = None,
         dimension: Optional[int] = None,
         get_or_create: bool = False,
@@ -101,7 +122,10 @@ class SysDB(Component):
 
     @abstractmethod
     def delete_collection(
-        self, id: UUID, tenant: str = DEFAULT_TENANT, database: str = DEFAULT_DATABASE
+        self,
+        id: UUID,
+        tenant: str = DEFAULT_TENANT,
+        database: str = DEFAULT_DATABASE,
     ) -> None:
         """Delete a collection, all associated segments and any associate resources (log stream)
         from the SysDB and the system at large."""
@@ -121,6 +145,15 @@ class SysDB(Component):
         pass
 
     @abstractmethod
+    def get_collection_with_segments(
+        self, collection_id: UUID
+    ) -> CollectionAndSegments:
+        """Get a consistent snapshot of a collection by id. This will return a collection with segment
+        information that matches the collection version and log position.
+        """
+        pass
+
+    @abstractmethod
     def update_collection(
         self,
         id: UUID,
@@ -131,4 +164,9 @@ class SysDB(Component):
         """Update a collection. Unspecified fields will be left unchanged. For metadata,
         keys with None values will be removed and keys not present in the UpdateMetadata
         dict will be left unchanged."""
+        pass
+
+    @abstractmethod
+    def get_collection_size(self, id: UUID) -> int:
+        """Returns the number of records in a collection."""
         pass

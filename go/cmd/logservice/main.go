@@ -2,20 +2,25 @@ package main
 
 import (
 	"context"
+	"net"
+
 	"github.com/chroma-core/chroma/go/pkg/log/configuration"
+	"github.com/chroma-core/chroma/go/pkg/log/leader"
+	"github.com/chroma-core/chroma/go/pkg/log/metrics"
 	"github.com/chroma-core/chroma/go/pkg/log/purging"
 	"github.com/chroma-core/chroma/go/pkg/log/repository"
 	"github.com/chroma-core/chroma/go/pkg/log/server"
+	"github.com/chroma-core/chroma/go/pkg/log/sysdb"
 	"github.com/chroma-core/chroma/go/pkg/proto/logservicepb"
 	"github.com/chroma-core/chroma/go/pkg/utils"
 	libs "github.com/chroma-core/chroma/go/shared/libs"
 	"github.com/chroma-core/chroma/go/shared/otel"
+	sharedOtel "github.com/chroma-core/chroma/go/shared/otel"
 	"github.com/pingcap/log"
 	"github.com/rs/zerolog"
 	"go.uber.org/automaxprocs/maxprocs"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"net"
 )
 
 func main() {
@@ -40,17 +45,21 @@ func main() {
 	if err != nil {
 		log.Fatal("failed to connect to postgres", zap.Error(err))
 	}
-	lr := repository.NewLogRepository(conn)
+	sysDb := sysdb.NewSysDB(config.SYSDB_CONN)
+	lr := repository.NewLogRepository(conn, sysDb)
 	server := server.NewLogServer(lr)
 	var listener net.Listener
 	listener, err = net.Listen("tcp", ":"+config.PORT)
 	if err != nil {
 		log.Fatal("failed to listen", zap.Error(err))
 	}
-	s := grpc.NewServer(grpc.UnaryInterceptor(otel.ServerGrpcInterceptor))
+	s := grpc.NewServer(grpc.UnaryInterceptor(sharedOtel.ServerGrpcInterceptor))
 	logservicepb.RegisterLogServiceServer(s, server)
 	log.Info("log service started", zap.String("address", listener.Addr().String()))
-	go purging.RunPurging(ctx, lr)
+	go leader.AcquireLeaderLock(ctx, func(ctx context.Context) {
+		go purging.PerformPurgingLoop(ctx, lr)
+		go metrics.PerformMetricsLoop(ctx, lr)
+	})
 	if err := s.Serve(listener); err != nil {
 		log.Fatal("failed to serve", zap.Error(err))
 	}

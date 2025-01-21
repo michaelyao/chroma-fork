@@ -8,7 +8,7 @@ authors = [
 ]
 description = "Chroma."
 readme = "README.md"
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 classifiers = [
   "Programming Language :: Python :: 3",
   "License :: OSI Approved :: Apache Software License",
@@ -17,10 +17,10 @@ classifiers = [
 dependencies = [
   'build >= 1.0.3',
   'pydantic >= 1.9',
-  'chroma-hnswlib==0.7.3',
+  'chroma-hnswlib==0.7.6',
   'fastapi >= 0.95.2',
   'uvicorn[standard] >= 0.18.3',
-  'numpy >= 1.22.5, < 2.0.0',
+  'numpy >= 1.22.5',
   'posthog >= 2.4.0',
   'typing_extensions >= 4.5.0',
   'onnxruntime >= 1.14.1',
@@ -43,12 +43,13 @@ dependencies = [
   'mmh3>=4.0.1',
   'orjson>=3.9.12',
   'httpx>=0.27.0',
+  'rich>=10.11.0',
 ]
 
 [tool.black]
 line-length = 88
 required-version = "23.3.0"                         # Black will refuse to run if it's not this version.
-target-version = ['py38', 'py39', 'py310', 'py311']
+target-version = ['py39', 'py310', 'py311']
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
@@ -74,6 +75,8 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools_scm]
 local_scheme = "no-local-version"
+tag_regex = '^(?P<version>[0-9]+\.[0-9]+\.[0-9]+)$'
+git_describe_command = 'git describe --tags --long --match "[0-9]*.[0-9]*.[0-9]*"'
 
 [tool.setuptools]
 packages = ["chromadb"]

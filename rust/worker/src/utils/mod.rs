@@ -1,3 +1,1 @@
-mod vec;
-
-pub(crate) use vec::*;
+pub(crate) mod convert;
