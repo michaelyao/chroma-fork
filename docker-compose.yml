@@ -1,10 +1,10 @@
 version: '3.9'
 
 networks:
-  chroma-net:
-    name: chroma_network
+  x8network:
+    name: x8network
     driver: bridge
-
+    external: true
 services:
   chroma-server:
     image: chroma-server-img
@@ -42,7 +42,7 @@ services:
       retries: 3
     container_name: chroma_db_server
     networks:
-      - chroma-net
+      - x8network
 
 volumes:
   chroma-data:
